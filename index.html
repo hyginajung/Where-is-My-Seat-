@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>중학교 영어수업 스마트 좌석 배치기</title>
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Noto+Sans+KR:wght@500;700;900&display=swap');
+        
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background-color: #f1f5f9;
+            touch-action: manipulation;
+        }
+
+        .font-board {
+            font-family: 'Gowun Dodum', sans-serif;
+        }
+
+        /* 3분단 구조 레이아웃: 2열 / (통로) / 2열 / (통로) / 2열 */
+        .seating-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr)) gap-x-2 repeat(2, minmax(0, 1fr)) gap-x-2 repeat(2, minmax(0, 1fr));
+        }
+
+        /* 책상 입체 카드 효과 */
+        .desk-card {
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        .desk-card:hover {
+            transform: translateY(-2px) scale(1.02);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.15);
+        }
+
+        /* 애니메이션 효과 */
+        @keyframes popIn {
+            0% { transform: scale(0.8); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .animate-pop {
+            animation: popIn 0.35s ease-out forwards;
+        }
+
+        /* 프린트 스타일 */
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white !important; p: 0; }
+            .print-container { shadow: none !important; border: none !important; }
+        }
+    </style>
+</head>
+<body class="min-h-screen text-slate-800 flex flex-col justify-between p-2 sm:p-4 md:p-6">
+
+    <!-- ========================================================================= -->
+    <!-- [선생님 전용 초기 설정 구역 - 수정 가능]                                   -->
+    <!-- 코드 하단의 CONFIG 객체를 수정하여 기본 조건들을 자유롭게 변경할 수 있습니다.      -->
+    <!-- ========================================================================= -->
+    <script>
+        // 코드 맨 위 커스텀 설정 구역 (필요시 이 값들을 변경하세요)
+        const DEFAULT_CONFIG = {
+            TOTAL_STUDENTS: 27,        // 총 학생 수 (1번 ~ 27번)
+            TOTAL_ROWS: 5,             // 행 (줄) 수 = 5줄
+            TOTAL_COLS: 6,             // 열 (칸) 수 = 6칸 (총 30자리 중 27자리 사용, 빈자리 3개)
+            
+            // 시력 보호 등 앞자리(1~2행) 고정 대상 번호
+            FRONT_SEAT_STUDENTS: [3, 14], 
+            
+            // 함께 앉으면 안 되는 학생 짝 목록 [학생A, 학생B]
+            SEPARATE_PAIRS: [
+                [5, 12],   // 5번과 12번 분리
+                [9, 21]    // 9번과 21번 분리
+            ],
+            
+            // 빈자리 지정 (행, 열) - 1-based index
+            // 요구사항: 가운데 분단(3,4열) 맨 뒷칸(5행) 1자리 비우기 -> (행 5, 열 4)
+            // 나머지 2개의 빈자리는 맨 뒷줄(5행) 양 끝으로 자동 배치되거나 고정 배치
+            DISABLED_SEATS: [
+                { row: 5, col: 4 }, // 가운데 분단 오른쪽 맨 뒷자리 (요구사항)
+                { row: 5, col: 1 }, // 왼쪽 분단 맨 뒷자리 (27명 구성을 위한 빈자리)
+                { row: 5, col: 6 }  // 오른쪽 분단 맨 뒷자리 (27명 구성을 위한 빈자리)
+            ]
+        };
+    </script>
+
+    <!-- Header Section -->
+    <header class="no-print max-w-7xl mx-auto w-full mb-3 md:mb-6">
+        <div class="bg-teal-800 text-white rounded-2xl p-4 md:p-6 shadow-lg flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-3">
+                <div class="bg-white/20 p-3 rounded-xl">
+                    <i class="fa-solid fa-graduation-cap text-3xl md:text-4xl text-teal-200"></i>
+                </div>
+                <div>
+                    <h1 class="text-2xl md:text-3xl font-black tracking-tight">2학년 영어 수업 좌석 배치</h1>
+                    <p class="text-teal-100 text-sm md:text-base font-medium">스마트 자동 무작위 배치 도구</p>
+                </div>
+            </div>
+
+            <!-- Main Actions -->
+            <div class="flex flex-wrap gap-2 sm:gap-3 w-full sm:w-auto justify-end">
+                <button onclick="toggleConfigModal()" class="bg-teal-700 hover:bg-teal-900 text-white font-bold py-3 px-4 md:px-5 rounded-xl text-lg flex items-center gap-2 transition shadow-md active:scale-95">
+                    <i class="fa-solid fa-sliders"></i>
+                    <span class="hidden md:inline">조건</span> 설정
+                </button>
+                <button onclick="shuffleSeats()" class="bg-emerald-400 hover:bg-emerald-300 text-teal-950 font-black py-3 px-6 md:px-8 rounded-xl text-xl md:text-2xl flex items-center gap-2 transition shadow-lg hover:shadow-emerald-400/50 active:scale-95 border-2 border-emerald-200">
+                    <i class="fa-solid fa-dice text-2xl md:text-3xl"></i>
+                    <span>다시 섞기</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Classroom Container -->
+    <main class="max-w-7xl mx-auto w-full flex-grow flex flex-col justify-center">
+        <div class="bg-white rounded-3xl p-4 sm:p-6 md:p-8 shadow-xl border border-slate-200 print-container flex flex-col gap-6">
+
+            <!-- 칠판 및 교탁 표시 (Classroom Front) -->
+            <div class="flex flex-col items-center gap-3">
+                <!-- 칠판 (클래식 다크그린 칠판 스타일) -->
+                <div class="w-full bg-emerald-950 text-emerald-100 py-3 md:py-4 rounded-xl text-center shadow-md border-b-8 border-emerald-900 border-x-4 border-x-amber-900 flex items-center justify-center gap-3">
+                    <i class="fa-solid fa-chalkboard text-emerald-400 text-xl md:text-2xl"></i>
+                    <span class="font-board text-xl md:text-3xl tracking-widest font-bold">칠 판 (BLACK BOARD)</span>
+                </div>
+
+                <!-- 교탁 -->
+                <div class="bg-stone-700 text-stone-100 px-8 md:px-12 py-2 rounded-lg font-bold text-lg md:text-xl shadow-md border-2 border-stone-800 flex items-center gap-2">
+                    <i class="fa-solid fa-display text-amber-300"></i>
+                    <span>교 탁</span>
+                </div>
+            </div>
+
+            <!-- 분단 표시 헤더 -->
+            <div class="grid grid-cols-3 gap-3 md:gap-8 text-center font-bold text-base md:text-xl text-teal-950">
+                <div class="bg-teal-50 py-2 rounded-lg border border-teal-100">1 분단</div>
+                <div class="bg-teal-50 py-2 rounded-lg border border-teal-100">2 분단</div>
+                <div class="bg-teal-50 py-2 rounded-lg border border-teal-100">3 분단</div>
+            </div>
+
+            <!-- 좌석 배치 격리판 (6열 5행) -->
+            <div id="grid-container" class="grid grid-cols-3 gap-3 md:gap-8">
+                <!-- 1분단 (1~2열) -->
+                <div id="group-1" class="grid grid-cols-2 gap-2 sm:gap-3 md:gap-4"></div>
+                <!-- 2분단 (3~4열) -->
+                <div id="group-2" class="grid grid-cols-2 gap-2 sm:gap-3 md:gap-4"></div>
+                <!-- 3분단 (5~6열) -->
+                <div id="group-3" class="grid grid-cols-2 gap-2 sm:gap-3 md:gap-4"></div>
+            </div>
+
+            <!-- 안내 및 범례 (Legend) -->
+            <div class="no-print mt-2 flex flex-wrap justify-between items-center text-xs md:text-sm text-slate-500 border-t pt-4 gap-2">
+                <div class="flex flex-wrap items-center gap-4">
+                    <span class="flex items-center gap-1.5"><span class="w-3.5 h-3.5 rounded-full bg-teal-600 inline-block"></span> 일반 좌석</span>
+                    <span class="flex items-center gap-1.5"><span class="w-3.5 h-3.5 rounded-full bg-amber-500 inline-block"></span> 앞자리 고정 학생</span>
+                    <span class="flex items-center gap-1.5"><span class="w-3.5 h-3.5 rounded-full bg-rose-500 inline-block"></span> 격리 규칙 적용 학생</span>
+                    <span class="flex items-center gap-1.5"><span class="w-3.5 h-3.5 rounded-full bg-slate-300 inline-block"></span> 빈 자리</span>
+                </div>
+                <div id="status-message" class="font-bold text-teal-700">
+                    <i class="fa-solid fa-circle-check"></i> 모든 배치가 조건에 부합합니다.
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="no-print text-center text-slate-400 text-xs md:text-sm mt-4">
+        Middle School English Class - Classroom Seat Assignment Tool
+    </footer>
+
+    <!-- 설정 모달 (Modal for Rule Settings) -->
+    <div id="config-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 shadow-2xl space-y-6">
+            <div class="flex justify-between items-center border-b pb-4">
+                <h2 class="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-gear text-teal-600"></i> 좌석 배치 조건 설정
+                </h2>
+                <button onclick="toggleConfigModal()" class="text-slate-400 hover:text-slate-600 text-2xl font-bold">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="space-y-5 text-sm md:text-base">
+                <!-- 앞자리 고정 학생 설정 -->
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <label class="block font-bold text-slate-700 mb-1">
+                        <i class="fa-solid fa-eye text-amber-500 mr-1"></i> 앞자리(1~2줄) 고정 학생 번호
+                    </label>
+                    <p class="text-xs text-slate-500 mb-2">쉼표(,)로 구분해서 번호를 입력하세요. (예: 3, 14)</p>
+                    <input type="text" id="input-front" class="w-full p-3 border rounded-xl font-bold text-teal-900 focus:ring-2 focus:ring-teal-500 outline-none" placeholder="예: 3, 14">
+                </div>
+
+                <!-- 이격 대상 쌍 설정 -->
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <label class="block font-bold text-slate-700 mb-1">
+                        <i class="fa-solid fa-user-slash text-rose-500 mr-1"></i> 떨어진 자리에 앉힐 학생 짝 (붙어 앉기 금지)
+                    </label>
+                    <p class="text-xs text-slate-500 mb-2">짝을 하이픈(-)으로, 짝 구분은 쉼표(,)로 입력하세요. (예: 5-12, 9-21)</p>
+                    <input type="text" id="input-separate" class="w-full p-3 border rounded-xl font-bold text-teal-900 focus:ring-2 focus:ring-teal-500 outline-none" placeholder="예: 5-12, 9-21">
+                </div>
+
+                <!-- 전체 학생 수 설정 -->
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <label class="block font-bold text-slate-700 mb-1">
+                        <i class="fa-solid fa-users text-teal-600 mr-1"></i> 학급 총 학생 수
+                    </label>
+                    <input type="number" id="input-total" min="1" max="30" class="w-full p-3 border rounded-xl font-bold text-teal-900 focus:ring-2 focus:ring-teal-500 outline-none" value="27">
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-3 border-t pt-4">
+                <button onclick="toggleConfigModal()" class="px-5 py-2.5 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold transition">
+                    취소
+                </button>
+                <button onclick="saveAndApplyConfig()" class="px-6 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold transition shadow-md">
+                    저장 및 다시 배치
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript 로직 -->
+    <script>
+        // 실행 시 유지되는 런타임 설정 데이터
+        let currentConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+
+        // 페이지 로드 시 초기화
+        window.onload = function() {
+            initInputsFromConfig();
+            shuffleSeats();
+        };
+
+        // 설정 모달 열기/닫기
+        function toggleConfigModal() {
+            const modal = document.getElementById('config-modal');
+            modal.classList.toggle('hidden');
+        }
+
+        // 초기 설정값을 UI 입력창에 반영
+        function initInputsFromConfig() {
+            document.getElementById('input-front').value = currentConfig.FRONT_SEAT_STUDENTS.join(', ');
+            
+            const pairsStr = currentConfig.SEPARATE_PAIRS
+                .map(pair => pair.join('-'))
+                .join(', ');
+            document.getElementById('input-separate').value = pairsStr;
+            document.getElementById('input-total').value = currentConfig.TOTAL_STUDENTS;
+        }
+
+        // 입력된 설정값 저장 및 새로고침
+        function saveAndApplyConfig() {
+            // 앞자리 고정 학생 파싱
+            const frontVal = document.getElementById('input-front').value;
+            const frontArr = frontVal.split(',')
+                .map(n => parseInt(n.trim()))
+                .filter(n => !isNaN(n) && n > 0 && n <= 30);
+            
+            // 이격 학생 짝 파싱
+            const sepVal = document.getElementById('input-separate').value;
+            const sepArr = [];
+            sepVal.split(',').forEach(pairStr => {
+                const parts = pairStr.split('-').map(n => parseInt(n.trim()));
+                if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+                    sepArr.push([parts[0], parts[1]]);
+                }
+            });
+
+            // 학생 수
+            const totalVal = parseInt(document.getElementById('input-total').value) || 27;
+
+            // 설정 적용
+            currentConfig.FRONT_SEAT_STUDENTS = frontArr;
+            currentConfig.SEPARATE_PAIRS = sepArr;
+            currentConfig.TOTAL_STUDENTS = Math.min(Math.max(totalVal, 1), 30);
+
+            toggleConfigModal();
+            shuffleSeats();
+        }
+
+        /**
+         * 핵심 배치 알고리즘 (백트래킹 & 조건검증)
+         */
+        function shuffleSeats() {
+            const totalRows = currentConfig.TOTAL_ROWS; // 5
+            const totalCols = currentConfig.TOTAL_COLS; // 6
+            const totalStudents = currentConfig.TOTAL_STUDENTS;
+
+            // 1. 좌석 그리드 초기화 (5행 6열 = 30자리)
+            // status: 'EMPTY_DISABLED' (비워둔 자리), 'FREE' (배치 가능)
+            let board = Array.from({ length: totalRows }, () => Array(totalCols).fill(null));
+
+            // 요구사항 및 규정에 따른 비활성 비워둘 자리 지정
+            currentConfig.DISABLED_SEATS.forEach(seat => {
+                const r = seat.row - 1;
+                const c = seat.col - 1;
+                if (r >= 0 && r < totalRows && c >= 0 && c < totalCols) {
+                    board[r][c] = { type: 'DISABLED', num: null };
+                }
+            });
+
+            // 학생 번호 배열 생성 (1 ~ N번)
+            let studentList = Array.from({ length: totalStudents }, (_, i) => i + 1);
+
+            let maxAttempts = 500; // 제약조건 충족 시도 횟수
+            let success = false;
+            let finalGrid = null;
+
+            while (maxAttempts > 0 && !success) {
+                maxAttempts--;
+                let gridCandidate = JSON.parse(JSON.stringify(board));
+                
+                // 학생 무작위 셔플
+                let shuffled = [...studentList];
+                for (let i = shuffled.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+                }
+
+                // 조건 1: 앞자리 고정 학생(FRONT_SEAT_STUDENTS)을 앞 2줄(0, 1 행)의 가능한 공간에 우선 배치
+                let frontStudents = currentConfig.FRONT_SEAT_STUDENTS.filter(s => s <= totalStudents);
+                let otherStudents = shuffled.filter(s => !frontStudents.includes(s));
+
+                // 앞줄 빈자리 좌표 수집 (행 0, 1)
+                let frontPositions = [];
+                for (let r = 0; r < 2; r++) {
+                    for (let c = 0; c < totalCols; c++) {
+                        if (gridCandidate[r][c] === null) {
+                            frontPositions.push({ r, c });
+                        }
+                    }
+                }
+
+                // 앞줄 좌표 섞기
+                frontPositions.sort(() => Math.random() - 0.5);
+
+                // 앞자리 학생 선배치 실패시 재시도
+                if (frontPositions.length < frontStudents.length) continue;
+
+                let placementOk = true;
+                for (let i = 0; i < frontStudents.length; i++) {
+                    const pos = frontPositions[i];
+                    gridCandidate[pos.r][pos.c] = { type: 'STUDENT', num: frontStudents[i], isFrontFixed: true };
+                }
+
+                // 나머지 일반 학생들 배치 (남은 빈자리 검색)
+                let remainingPositions = [];
+                for (let r = 0; r < totalRows; r++) {
+                    for (let c = 0; c < totalCols; c++) {
+                        if (gridCandidate[r][c] === null) {
+                            remainingPositions.push({ r, c });
+                        }
+                    }
+                }
+
+                // 나머지 학생 채우기
+                for (let i = 0; i < otherStudents.length; i++) {
+                    if (i < remainingPositions.length) {
+                        const pos = remainingPositions[i];
+                        gridCandidate[pos.r][pos.c] = { type: 'STUDENT', num: otherStudents[i], isFrontFixed: false };
+                    }
+                }
+
+                // 나머지 공간 비움 처리
+                for (let r = 0; r < totalRows; r++) {
+                    for (let c = 0; c < totalCols; c++) {
+                        if (gridCandidate[r][c] === null) {
+                            gridCandidate[r][c] = { type: 'EMPTY', num: null };
+                        }
+                    }
+                }
+
+                // 조건 2: 격리 규칙 (SEPARATE_PAIRS) 검증 - 이웃(상하좌우 및 대각선/짝꿍 자리) 인접 여부 확인
+                if (validateSeparation(gridCandidate, currentConfig.SEPARATE_PAIRS)) {
+                    success = true;
+                    finalGrid = gridCandidate;
+                }
+            }
+
+            // 배치 결과 그리기
+            if (success && finalGrid) {
+                renderGrid(finalGrid);
+                document.getElementById('status-message').innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600"></i> 성공적으로 배치가 완료되었습니다!`;
+            } else {
+                // 제약 조건이 너무 까다로워 실패한 경우 기본 무작위 배치 진행
+                alert('설정한 제약 조건이 너무 빡빡하여 조건에 맞는 완전한 배치를 찾지 못했습니다. 일반 무작위 배치를 진행합니다.');
+                renderFallbackGrid();
+                document.getElementById('status-message').innerHTML = `<i class="fa-solid fa-triangle-exclamation text-amber-500"></i> 일부 조건이 완화된 무작위 배치 결과입니다.`;
+            }
+        }
+
+        /**
+         * 상하좌우 및 인접 대각선 자리 떨어뜨리기 검증 함수
+         */
+        function validateSeparation(grid, pairs) {
+            const rows = grid.length;
+            const cols = grid[0].length;
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const cell = grid[r][c];
+                    if (cell && cell.type === 'STUDENT') {
+                        const studentNum = cell.num;
+
+                        // 이 학생과 붙으면 안 되는 짝 번호들 찾기
+                        const forbiddenList = [];
+                        pairs.forEach(([a, b]) => {
+                            if (a === studentNum) forbiddenList.push(b);
+                            if (b === studentNum) forbiddenList.push(a);
+                        });
+
+                        if (forbiddenList.length === 0) continue;
+
+                        // 주변 8방향 인접 자리 검사
+                        for (let dr = -1; dr <= 1; dr++) {
+                            for (let dc = -1; dc <= 1; dc++) {
+                                if (dr === 0 && dc === 0) continue;
+                                const nr = r + dr;
+                                const nc = c + dc;
+                                if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+                                    const neighbor = grid[nr][nc];
+                                    if (neighbor && neighbor.type === 'STUDENT' && forbiddenList.includes(neighbor.num)) {
+                                        return false; // 붙어앉은 짝 발견! 실패.
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return true;
+        }
+
+        /**
+         * 그리드 HTML 렌더링 함수
+         */
+        function renderGrid(grid) {
+            const group1 = document.getElementById('group-1');
+            const group2 = document.getElementById('group-2');
+            const group3 = document.getElementById('group-3');
+
+            group1.innerHTML = '';
+            group2.innerHTML = '';
+            group3.innerHTML = '';
+
+            const totalRows = grid.length; // 5
+
+            // 행(Row) 순서대로 렌더링 (맨 앞줄이 칠판 근처)
+            for (let r = 0; r < totalRows; r++) {
+                // 각 분단별 2열씩 나눠서 해당 그룹에 추가
+                for (let c = 0; c < 6; c++) {
+                    const cellData = grid[r][c];
+                    const card = createDeskCard(cellData, r, c);
+
+                    if (c < 2) {
+                        group1.appendChild(card);
+                    } else if (c < 4) {
+                        group2.appendChild(card);
+                    } else {
+                        group3.appendChild(card);
+                    }
+                }
+            }
+        }
+
+        /**
+         * 개별 책상 카드 Element 생성
+         */
+        function createDeskCard(cell, r, c) {
+            const div = document.createElement('div');
+            div.className = `desk-card rounded-2xl p-2 sm:p-3 md:p-4 flex flex-col justify-center items-center h-20 sm:h-24 md:h-28 text-center animate-pop border-2 select-none`;
+
+            // 분리 대상 학생인지 확인
+            let isSeparateTarget = false;
+            if (cell.type === 'STUDENT') {
+                isSeparateTarget = currentConfig.SEPARATE_PAIRS.some(pair => pair.includes(cell.num));
+            }
+
+            if (cell.type === 'DISABLED' || cell.type === 'EMPTY') {
+                // 비어있는 책상
+                div.className += ` bg-slate-100 border-dashed border-slate-300 text-slate-400`;
+                div.innerHTML = `
+                    <i class="fa-solid fa-chair text-lg md:text-2xl mb-1 opacity-40"></i>
+                    <span class="text-xs md:text-sm font-bold opacity-60">빈 자리</span>
+                `;
+            } else if (cell.type === 'STUDENT') {
+                if (cell.isFrontFixed) {
+                    // 앞자리 시력보호 고정 학생 카드 (밝은 앰버/옐로우 스타일)
+                    div.className += ` bg-amber-500 border-amber-600 text-white`;
+                    div.innerHTML = `
+                        <div class="flex items-center gap-1 text-amber-100 text-[10px] sm:text-xs font-bold mb-0.5">
+                            <i class="fa-solid fa-eye"></i> 앞자리
+                        </div>
+                        <div class="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight">${cell.num}<span class="text-base md:text-xl font-normal">번</span></div>
+                    `;
+                } else if (isSeparateTarget) {
+                    // 이격 관리 대상 학생 (코랄/로즈 스타일)
+                    div.className += ` bg-rose-500 border-rose-600 text-white`;
+                    div.innerHTML = `
+                        <div class="flex items-center gap-1 text-rose-100 text-[10px] sm:text-xs font-bold mb-0.5">
+                            <i class="fa-solid fa-user-shield"></i> 이격배치
+                        </div>
+                        <div class="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight">${cell.num}<span class="text-base md:text-xl font-normal">번</span></div>
+                    `;
+                } else {
+                    // 일반 학생 카드 (세련된 티얼 스타일)
+                    div.className += ` bg-teal-600 border-teal-700 text-white`;
+                    div.innerHTML = `
+                        <div class="text-teal-200 text-[10px] sm:text-xs font-medium mb-0.5">학생</div>
+                        <div class="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight">${cell.num}<span class="text-base md:text-xl font-normal">번</span></div>
+                    `;
+                }
+            }
+
+            return div;
+        }
+
+        /**
+         * 예외 시 폴백(Fallback) 단순 무작위 렌더링
+         */
+        function renderFallbackGrid() {
+            let nums = Array.from({ length: currentConfig.TOTAL_STUDENTS }, (_, i) => i + 1);
+            nums.sort(() => Math.random() - 0.5);
+
+            let fallbackGrid = Array.from({ length: 5 }, () => Array(6).fill(null));
+            let idx = 0;
+
+            // 맨 뒷줄 가운데 빈자리 규정 적용
+            currentConfig.DISABLED_SEATS.forEach(seat => {
+                fallbackGrid[seat.row - 1][seat.col - 1] = { type: 'DISABLED', num: null };
+            });
+
+            for (let r = 0; r < 5; r++) {
+                for (let c = 0; c < 6; c++) {
+                    if (fallbackGrid[r][c] === null) {
+                        if (idx < nums.length) {
+                            const studentNum = nums[idx++];
+                            const isFront = currentConfig.FRONT_SEAT_STUDENTS.includes(studentNum);
+                            fallbackGrid[r][c] = { type: 'STUDENT', num: studentNum, isFrontFixed: isFront };
+                        } else {
+                            fallbackGrid[r][c] = { type: 'EMPTY', num: null };
+                        }
+                    }
+                }
+            }
+            renderGrid(fallbackGrid);
+        }
+    </script>
+</body>
+</html>
